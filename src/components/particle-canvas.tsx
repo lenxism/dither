@@ -19,6 +19,7 @@ import {
   type Shockwave,
 } from "@/lib/particle-system";
 import { useIsMobile } from "@/lib/use-is-mobile";
+import { buildEmbedHTML, imageSrcToDataUrl } from "@/lib/embed-runtime";
 
 interface ParticleCanvasProps {
   imageSrc: string;
@@ -26,7 +27,20 @@ interface ParticleCanvasProps {
   onLogoPresetChange: (src: string) => void;
 }
 
+const DEFAULT_GRID_SIZE = 205;
+
 const GRID_SIZE = 205;
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const LOGO_PRESETS = {
   linear: "/linear-app-icon.png",
@@ -48,6 +62,7 @@ export default function ParticleCanvas({
   const prevConfigRef = useRef<string>("");
   const gridDimsRef = useRef({ w: GRID_SIZE, h: GRID_SIZE });
   const isMobile = useIsMobile();
+  const exportRef = useRef<() => void>(() => {});
 
   const params = useDialKit("Dither Playground", {
     algorithm: {
@@ -86,11 +101,42 @@ export default function ParticleCanvas({
     },
 
     upload: { type: "action" },
+    export: { type: "action" },
   }, {
     onAction: (action) => {
       if (action === "upload") onUploadRequest();
+      if (action === "export") exportRef.current();
     },
   });
+
+  const exportArtwork = useCallback(async () => {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dataUrl = await imageSrcToDataUrl(imageSrc);
+    const html = buildEmbedHTML({
+      imageDataUrl: dataUrl,
+      algorithm: params.algorithm as "floyd-steinberg" | "bayer" | "blue-noise",
+      scale: params.scale,
+      dotScale: params.dotScale,
+      invert: params.invert,
+      image: {
+        threshold: params.image.threshold,
+        contrast: params.image.contrast,
+        gamma: params.image.gamma,
+        blur: params.image.blur,
+        highlightsCompression: params.image.highlightsCompression,
+      },
+      dither: {
+        errorStrength: params.dither.errorStrength,
+        serpentine: params.dither.serpentine,
+      },
+      shape: { cornerRadius: params.shape.cornerRadius },
+      gridSize: DEFAULT_GRID_SIZE,
+    });
+    const blob = new Blob([html], { type: "text/html" });
+    downloadBlob(blob, `dither-embed-${ts}.html`);
+  }, [imageSrc, params.algorithm, params.scale, params.dotScale, params.invert, params.image, params.dither, params.shape]);
+
+  exportRef.current = exportArtwork;
 
   const algorithm = params.algorithm as DitherAlgorithm;
 
